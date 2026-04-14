@@ -32,12 +32,6 @@ module "zpa_prefix_lists" {
   environment = var.environment
 }
 
-module "office_prefix_lists" {
-  source      = "../modules/prefix-list-consumer"
-  service     = "Office"
-  environment = var.environment
-}
-
 resource "aws_security_group" "app" {
   name        = "app-prefix-list-demo"
   description = "Example workload SG consuming managed prefix lists (tag-based discovery)"
@@ -56,20 +50,8 @@ resource "aws_vpc_security_group_ingress_rule" "zpa" {
   description       = "ZPA ingress via managed prefix list ${each.value}"
 }
 
-resource "aws_vpc_security_group_ingress_rule" "office" {
-  for_each = toset(module.office_prefix_lists.ids)
-
-  security_group_id = aws_security_group.app.id
-  prefix_list_id    = each.value
-  ip_protocol       = "tcp"
-  from_port         = 22
-  to_port           = 22
-  description       = "Office SSH ingress via managed prefix list ${each.value}"
-}
-
 output "attached_prefix_lists" {
   value = {
-    zpa    = module.zpa_prefix_lists.details
-    office = module.office_prefix_lists.details
+    zpa = module.zpa_prefix_lists.details
   }
 }

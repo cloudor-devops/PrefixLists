@@ -118,12 +118,12 @@ prefix list via `local.shared_prefix_list_arns`, and attaches each consumer
 account principal. Gated behind `var.ram_enabled`, default `false`, so Steps 1+2
 deliver value in a single account first.
 
-Enable with:
-```bash
-terraform apply \
-  -var 'ram_enabled=true' \
-  -var 'ram_principals=["111111111111","222222222222"]'
+Enable via `terraform.tfvars` (see `provider/<region>/terraform.tfvars.example`):
+```hcl
+ram_enabled    = true
+ram_principals = ["111111111111", "222222222222"]
 ```
+Then `terraform apply`.
 
 ## Run book
 
@@ -138,3 +138,99 @@ terraform apply
 $EDITOR provider/us-east-1/zpa-connectors.tf
 terraform apply
 ```
+
+## Replicating this repo for your own environment
+
+No customer-specific values are baked into the code. All environment-specific
+settings live in gitignored `terraform.tfvars` files, with tracked
+`terraform.tfvars.example` templates showing what to fill in.
+
+### 1. Clone and pick your region
+
+```bash
+git clone https://github.com/cloudor-devops/PrefixLists.git
+cd PrefixLists
+```
+
+The repo ships with two example regions: `provider/us-east-1/` and
+`provider/eu-west-1/`. Delete the one you don't need, or rename/copy to your
+target region. Update `providers.tf` inside to your region name.
+
+### 2. Author your prefix lists
+
+Replace the example CIDRs in `provider/<region>/*.tf` with your real ones:
+- `zpa-connectors.tf`, `cpc.tf`, `offices.tf` are the example groupings —
+  rename / add / remove as your services dictate.
+- Update `max_entries` (with `current × 2`, floor 15-20) and the `# PADDING`
+  comment.
+- Tag `Service` / `Group` / `Environment` / `Owner` consistently — they're
+  used by the consumer discovery when prefix lists are **locally** owned.
+- Add each list's ARN to `local.shared_prefix_list_arns` in `ram.tf`.
+
+### 3. Configure RAM sharing
+
+```bash
+cp provider/us-east-1/terraform.tfvars.example provider/us-east-1/terraform.tfvars
+$EDITOR provider/us-east-1/terraform.tfvars
+# set ram_principals to your consumer account IDs
+```
+
+Then:
+```bash
+cd provider/us-east-1
+terraform init
+terraform apply
+```
+
+If the consumer accounts are not in the same AWS Organization, accept the
+RAM invitation from each consumer account once:
+```bash
+aws ram get-resource-share-invitations --profile <consumer> --region <region>
+aws ram accept-resource-share-invitation \
+  --profile <consumer> --region <region> \
+  --resource-share-invitation-arn <arn-from-above>
+```
+
+### 4. Wire consumer workloads
+
+```bash
+cp consumer/terraform.tfvars.example consumer/terraform.tfvars
+$EDITOR consumer/terraform.tfvars
+# set provider_owner_id, vpc_id, optionally aws_profile
+```
+
+`consumer/main.tf` is an example. In real workloads, import
+`modules/prefix-list-consumer` directly from wherever your SG lives:
+
+```hcl
+module "zpa_pl" {
+  source      = "git::https://github.com/cloudor-devops/PrefixLists.git//modules/prefix-list-consumer?ref=main"
+  owner_id    = "111111111111"        # the provider account ID
+  name_prefix = "zpa-connectors-"     # matches your provider naming convention
+}
+
+resource "aws_vpc_security_group_ingress_rule" "zpa" {
+  for_each          = toset(module.zpa_pl.ids)
+  security_group_id = aws_security_group.app.id
+  prefix_list_id    = each.value
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+}
+```
+
+For **locally-owned** lists (single-account POC, no RAM), use the tag filter
+mode instead — `service`, `environment`, `group` — since
+owner-applied tags are visible on same-account lookups.
+
+### What to change per customer
+
+| File | Change |
+|---|---|
+| `provider/<region>/*.tf` | Replace example CIDRs, descriptions, names, owners |
+| `provider/<region>/ram.tf` | Update `local.shared_prefix_list_arns` as you add/remove lists |
+| `provider/<region>/terraform.tfvars` | Set `ram_principals` (gitignored, create from `.example`) |
+| `consumer/terraform.tfvars` | Set `provider_owner_id`, `vpc_id`, optional `aws_profile` |
+| `consumer/main.tf` | Update `name_prefix` values in module blocks to match your naming |
+| `RAM-POC.md` | Historical execution log from the original run — treat as reference, not config |
+

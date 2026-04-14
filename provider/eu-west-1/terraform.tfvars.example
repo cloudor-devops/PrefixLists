@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored; this .example file is tracked.
+
+ram_enabled = true
+
+ram_principals = [
+  "222222222222", # consumer-account-1
+]
+
+ram_allow_external_principals = true

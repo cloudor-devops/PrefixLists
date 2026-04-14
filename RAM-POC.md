@@ -1,5 +1,12 @@
 # RAM POC — Execution Log
 
+> **This is a historical execution log** from the original reference run — the
+> account IDs, prefix list IDs, invitation ARNs, VPC IDs and CIDRs below are
+> **not placeholders**. They document what happened during the first live demo.
+> When replicating this POC for a new customer, treat this file as reference
+> reading and substitute your own values from `terraform.tfvars`. See
+> `README.md` → "Replicating this repo for your own environment".
+
 End-to-end test of the Managed Prefix List + AWS RAM cross-account flow.
 
 ## Accounts

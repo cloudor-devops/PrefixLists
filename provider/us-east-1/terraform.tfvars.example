@@ -1,0 +1,16 @@
+# Copy to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored; this .example file is tracked.
+
+# Enable AWS RAM sharing once you have consumer account(s) ready.
+ram_enabled = true
+
+# Accounts / org ARNs that receive the shared prefix lists.
+ram_principals = [
+  "222222222222", # consumer-account-1
+  # "333333333333",                 # consumer-account-2
+  # "arn:aws:organizations::111111111111:ou/o-xxxx/ou-xxxx-yyyyyyyy", # whole OU
+]
+
+# Leave true for standalone accounts not in the same AWS Organization.
+# Set to false if all consumers are inside the same org as this account.
+ram_allow_external_principals = true

@@ -12,7 +12,9 @@ tfplan.*
 plan.txt
 plan.json
 
-# Local overrides
+# Local overrides (actual tfvars tracked only via *.example)
+terraform.tfvars
+terraform.tfvars.json
 *.auto.tfvars
 *.auto.tfvars.json
 override.tf

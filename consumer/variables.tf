@@ -1,15 +1,22 @@
 variable "region" {
-  type    = string
-  default = "us-east-1"
+  description = "AWS region to deploy into."
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "aws_profile" {
+  description = "Named AWS profile to use for the consumer account. Leave null to use default credentials / env vars."
+  type        = string
+  default     = null
 }
 
 variable "provider_owner_id" {
-  description = "AWS account ID that owns the shared prefix lists (the provider account)."
+  description = "AWS account ID that owns the shared prefix lists (the provider account that runs the provider/ stack)."
   type        = string
-  default     = "492094933642"
+  # No default — must be supplied per environment (terraform.tfvars or -var).
 }
 
 variable "vpc_id" {
-  description = "VPC the example security group is created in."
+  description = "VPC in the consumer account where the example Security Group is created."
   type        = string
 }

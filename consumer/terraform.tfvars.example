@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored; this .example file is tracked.
+
+# AWS account ID that owns the shared prefix lists (runs the provider/ stack).
+provider_owner_id = "111111111111"
+
+# VPC in the consumer account where the example SG is created.
+vpc_id = "vpc-xxxxxxxxxxxxxxxxx"
+
+# Optional: named AWS profile for the consumer account. Omit to use default creds.
+# aws_profile = "my-consumer-profile"
+
+# Optional: override the default region.
+# region = "us-east-1"

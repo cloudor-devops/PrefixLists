@@ -6,12 +6,12 @@ output "prefix_lists" {
       max_entries     = aws_ec2_managed_prefix_list.zpa_connectors.max_entries
       current_entries = length(aws_ec2_managed_prefix_list.zpa_connectors.entry)
     }
-    offices = {
-      id              = aws_ec2_managed_prefix_list.offices.id
-      arn             = aws_ec2_managed_prefix_list.offices.arn
-      max_entries     = aws_ec2_managed_prefix_list.offices.max_entries
-      current_entries = length(aws_ec2_managed_prefix_list.offices.entry)
-    }
+    # offices = {
+    #   id              = aws_ec2_managed_prefix_list.offices.id
+    #   arn             = aws_ec2_managed_prefix_list.offices.arn
+    #   max_entries     = aws_ec2_managed_prefix_list.offices.max_entries
+    #   current_entries = length(aws_ec2_managed_prefix_list.offices.entry)
+    # }
   }
 }
 

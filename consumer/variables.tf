@@ -10,10 +10,10 @@ variable "aws_profile" {
   default     = null
 }
 
-variable "provider_owner_id" {
-  description = "AWS account ID that owns the shared prefix lists (the provider account that runs the provider/ stack)."
+variable "environment" {
+  description = "Environment tag to filter prefix lists by (prod/staging/dev)."
   type        = string
-  # No default — must be supplied per environment (terraform.tfvars or -var).
+  default     = "prod"
 }
 
 variable "vpc_id" {

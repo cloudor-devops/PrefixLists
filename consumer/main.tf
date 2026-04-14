@@ -13,28 +13,34 @@
 #   ]
 # }
 ###############################################################################
-# AFTER: owner_id + name_prefix discovery across AWS RAM.
+# AFTER: tag-based dynamic discovery (the spec's original design).
 #
-# Owner-applied tags do NOT propagate across RAM, so we filter by the provider
-# account's owner-id + a name-prefix. Region is still implicit (API is
-# region-scoped).
+# Consumer filters by Service / Environment / Group tags. No hardcoded pl-xxx
+# IDs, no CIDRs. Region is implicit — the aws provider's region scopes the
+# lookup, so cross-region leakage is impossible.
+#
+# Important caveat for cross-account RAM: AWS does not propagate the owner's
+# tags to consumers. If the prefix lists are owned by a different account and
+# shared via RAM, tag-based filters will return empty on the consumer side.
+# For that scenario the module also supports owner_id + name_prefix mode —
+# pass those instead of service/environment.
 ###############################################################################
 
 module "zpa_prefix_lists" {
   source      = "../modules/prefix-list-consumer"
-  owner_id    = var.provider_owner_id
-  name_prefix = "zpa-connectors-"
+  service     = "ZPA"
+  environment = var.environment
 }
 
 module "office_prefix_lists" {
   source      = "../modules/prefix-list-consumer"
-  owner_id    = var.provider_owner_id
-  name_prefix = "offices-corp-"
+  service     = "Office"
+  environment = var.environment
 }
 
 resource "aws_security_group" "app" {
   name        = "app-prefix-list-demo"
-  description = "Example workload SG consuming managed prefix lists (RAM-shared)"
+  description = "Example workload SG consuming managed prefix lists (tag-based discovery)"
   vpc_id      = var.vpc_id
 }
 

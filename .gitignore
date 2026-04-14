@@ -1,0 +1,27 @@
+# Terraform
+.terraform/
+.terraform.tfstate.lock.info
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Plans — may contain sensitive values
+tfplan
+tfplan.*
+plan.txt
+plan.json
+
+# Local overrides
+*.auto.tfvars
+*.auto.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Claude local config
+.claude/settings.local.json
+
+# OS
+.DS_Store

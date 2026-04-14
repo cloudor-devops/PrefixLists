@@ -28,8 +28,8 @@
 
 module "zpa_prefix_lists" {
   source      = "../modules/prefix-list-consumer"
-  service     = "ZPA"
-  environment = var.environment
+    owner_id    = "879381250528"                                                                                                                                                                                             
+    name_prefix = "zpa-connectors-"     
 }
 
 resource "aws_security_group" "app" {

@@ -13,32 +13,32 @@
 #   ]
 # }
 ###############################################################################
-# AFTER: tag-based dynamic discovery (the spec's original design).
+# AFTER: cross-account dynamic discovery with LIVE tag sync.
 #
-# Consumer filters by Service / Environment / Group tags. No hardcoded pl-xxx
-# IDs, no CIDRs. Region is implicit — the aws provider's region scopes the
-# lookup, so cross-region leakage is impossible.
+# Tag state on the consumer side is managed entirely by the tag-sync Lambda
+# in consumer/tag-sync.tf — it mirrors every tag change from the provider
+# account in near-real-time (EventBridge -> cross-account forward -> Lambda).
+# No static service_name_map, no per-apply manual tagging.
 #
-# Important caveat for cross-account RAM: AWS does not propagate the owner's
-# tags to consumers. If the prefix lists are owned by a different account and
-# shared via RAM, tag-based filters will return empty on the consumer side.
-# For that scenario the module also supports owner_id + name_prefix mode —
-# pass those instead of service/environment.
+# For discovery we still use owner_id + name_prefix here because it doesn't
+# depend on tags being present, so the first plan works even before the
+# Lambda's bootstrap invocation has run. Once tags are flowing, you can
+# switch this block to pure tag-based discovery (service = "ZPA", ...) and
+# it will work too — the Lambda keeps the tag state current.
 ###############################################################################
 
 module "zpa_prefix_lists" {
   source      = "../modules/prefix-list-consumer"
-    owner_id    = "879381250528"                                                                                                                                                                                             
-    name_prefix = "zpa-connectors-"     
+  owner_id    = var.provider_owner_id
+  name_prefix = "zpa-connectors-"
 }
 
 resource "aws_security_group" "app" {
   name        = "app-prefix-list-demo"
-  description = "Example workload SG consuming managed prefix lists (tag-based discovery)"
+  description = "Example workload SG consuming RAM-shared managed prefix lists"
   vpc_id      = var.vpc_id
 }
 
-# One rule per prefix list (SGs do not accept multiple prefix_list_ids per rule).
 resource "aws_vpc_security_group_ingress_rule" "zpa" {
   for_each = toset(module.zpa_prefix_lists.ids)
 

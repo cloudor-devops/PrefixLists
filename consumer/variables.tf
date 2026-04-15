@@ -10,10 +10,9 @@ variable "aws_profile" {
   default     = null
 }
 
-variable "environment" {
-  description = "Environment tag to filter prefix lists by (prod/staging/dev)."
+variable "provider_owner_id" {
+  description = "AWS account ID that owns the RAM-shared prefix lists (the provider account)."
   type        = string
-  default     = "prod"
 }
 
 variable "vpc_id" {

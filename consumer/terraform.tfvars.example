@@ -1,15 +1,17 @@
 # Copy to terraform.tfvars and fill in your values.
 # terraform.tfvars is gitignored; this .example file is tracked.
 
+# AWS account ID that owns the RAM-shared prefix lists (the provider account).
+provider_owner_id = "492094933642"
+
 # VPC in the consumer account where the example SG is created.
 vpc_id = "vpc-xxxxxxxxxxxxxxxxx"
 
-# Environment tag to filter prefix lists on (matches the Environment tag
-# on the provider-side aws_ec2_managed_prefix_list resources).
-# environment = "prod"
-
 # Optional: named AWS profile for the consumer account. Omit to use default creds.
-# aws_profile = "my-consumer-profile"
+# aws_profile = "pilot"
 
 # Optional: override the default region.
 # region = "us-east-1"
+
+# Optional: which Environment value the verification filter looks for.
+# environment = "prod"

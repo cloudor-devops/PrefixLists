@@ -22,6 +22,9 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# Generated Lambda zip (built by archive_file data source)
+**/.lambda.zip
+
 # Claude local config
 .claude/settings.local.json
 

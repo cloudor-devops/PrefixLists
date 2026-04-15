@@ -1,0 +1,4 @@
+aws_profile                = "workload-staging"
+staging_network_account_id = "222222222222"
+shared_network_account_id  = "111111111111"
+vpc_id                     = "vpc-xxxxxxxxxxxxxxxxx"

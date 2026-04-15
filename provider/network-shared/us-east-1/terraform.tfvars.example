@@ -1,0 +1,12 @@
+aws_profile    = "network-shared"
+ram_enabled    = true
+ram_principals = [
+  # When Organization-wide sharing is enabled, use the Org ARN so new
+  # accounts auto-join without Terraform edits:
+  # "arn:aws:organizations::111111111111:organization/o-xxxxxxxx",
+
+  # Otherwise enumerate every consumer account ID across all envs:
+  "222222222222", # workload-prod-us-east-1
+  "333333333333", # workload-staging-us-east-1
+  "444444444444", # workload-dr-eu-west-1
+]

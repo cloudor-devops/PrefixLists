@@ -1,0 +1,5 @@
+aws_profile    = "network-dr"
+ram_enabled    = true
+ram_principals = [
+  "333333333333", # workload-dr-eu-west-1
+]

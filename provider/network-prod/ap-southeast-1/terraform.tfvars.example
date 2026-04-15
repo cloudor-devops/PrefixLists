@@ -1,0 +1,5 @@
+aws_profile    = "network-prod"
+ram_enabled    = true
+ram_principals = [
+  "111111111111", # workload-prod-apse1
+]

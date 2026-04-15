@@ -8,7 +8,9 @@
 locals {
   shared_prefix_list_arns = var.ram_enabled ? {
     zpa-connectors = aws_ec2_managed_prefix_list.zpa_connectors.arn
-
+    offices        = aws_ec2_managed_prefix_list.offices.arn
+    cpc            = aws_ec2_managed_prefix_list.cpc.arn
+    vendor-apis    = aws_ec2_managed_prefix_list.vendor_apis.arn
   } : {}
 }
 

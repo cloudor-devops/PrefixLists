@@ -1,0 +1,4 @@
+aws_profile               = "workload-prod"
+prod_network_account_id   = "492094933642"
+shared_network_account_id = "492094933642"  # single account holds both leaves — or a separate shared account
+vpc_id                    = "vpc-0ad53ed8c6ac30cfb"

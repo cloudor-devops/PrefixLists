@@ -1,0 +1,5 @@
+aws_profile    = "network-staging"
+ram_enabled    = true
+ram_principals = [
+  "222222222222", # workload-staging-us-east-1
+]

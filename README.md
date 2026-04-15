@@ -1,38 +1,56 @@
 # Managed Prefix Lists POC
 
-Refactors external-access CIDR management (ZPA Connectors, CPC, Offices, ...) from
-inline SG rules into **AWS VPC Managed Prefix Lists**, shared cross-account via **AWS
-RAM**, and consumed via **tag-based data source discovery** (no hard-coded `pl-xxx`).
+Refactors external-access CIDR management (ZPA Connectors, CPC, Offices, vendor
+whitelists, ...) from inline SG rules into **AWS VPC Managed Prefix Lists**,
+shared cross-account via **AWS RAM**, and consumed via `owner_id + name_prefix`
+data source discovery (no hard-coded `pl-xxx`).
+
+## Documentation index
+
+- **[TOPOLOGY.md](TOPOLOGY.md)** — the folder model, discovery contract, onboarding flows
+- **[SCENARIOS.md](SCENARIOS.md)** — 9 real-world variations with concrete folder/tfvars changes
+- **[CUSTOMER.md](CUSTOMER.md)** — one-page handoff guide for new customer engagements
+- **[RAM-POC.md](RAM-POC.md)** — historical reference execution log from the first end-to-end run
 
 ## Layout
 
 ```
 provider/
-  us-east-1/                # Root stack: one prefix list per .tf file
-    versions.tf
-    providers.tf
-    variables.tf            # ram_enabled, ram_principals
-    _tags.tf                # common tags
-    zpa-connectors.tf       # aws_ec2_managed_prefix_list.zpa_connectors
-    ram.tf                  # aws_ram_resource_share + associations
-    outputs.tf
-  eu-west-1/                # Same shape, multiple lists
-    zpa-connectors.tf
-    cpc.tf
-    offices.tf
-    ram.tf
-    ...
+  network-prod/             # Prod-env network account
+    us-east-1/              # <- leaf stack (versions.tf, ram.tf, *.tf, terraform.tfvars)
+      zpa-connectors.tf
+      cpc.tf
+      offices.tf
+      vendor-whitelist.tf
+      ram.tf                # one aws_ram_resource_share + associations
+    eu-west-1/              # sibling region, independent state
+    ap-southeast-1/         # another region (template)
+  network-staging/
+    us-east-1/              # staging-env CIDRs + staging consumer account IDs
+  network-dr/
+    eu-west-1/              # DR region; mirror of prod in a different region
+  network-shared/
+    us-east-1/              # cross-env lists (offices, vendor APIs) for all envs
+
+consumer/
+  examples/
+    workload-prod-us-east-1/     # prod workload SG wiring (uses prod + shared)
+    workload-staging-us-east-1/  # staging workload SG wiring
+    workload-dr-eu-west-1/       # DR workload SG wiring (single region)
+
 modules/
-  prefix-list-consumer/     # Tag-filtered data source wrapper (consumer side)
-consumer/                   # Example consumer root stack (workload account)
+  prefix-list-consumer/     # Data-source wrapper (owner_id OR tag filters)
+
+.github/workflows/
+  ci.yml                    # leaf discovery + matrix plan/apply
+  drift.yml                 # nightly drift detection
 ```
 
-## Per-region stacks
+## Leaf-folder rule
 
-Prefix Lists and RAM shares are **strictly per-region**. Each region is its own
-root stack — one `terraform init` / `apply` per region, independent state. No
-provider aliases, no workspaces, no filtering logic: `cd provider/us-east-1 &&
-terraform apply`.
+**Every folder containing `versions.tf` is an independent Terraform stack.** One
+`init/plan/apply` per leaf. State never crosses leaves. See
+[TOPOLOGY.md](TOPOLOGY.md) for the full model.
 
 ## How the provider team manages IPs
 
@@ -86,30 +104,36 @@ max_entries = 20
 This constraint drives **splitting by group/region** rather than one giant list:
 each consumer SG only reserves quota for the list it actually attaches.
 
-## Tag-based discovery (the selling point)
+## Dynamic discovery (the selling point)
 
-Every list is tagged with:
+Consumers find prefix lists by `owner_id + name_prefix` — no hard-coded `pl-xxx`:
+
+```hcl
+module "zpa_pl" {
+  source      = "../modules/prefix-list-consumer"
+  owner_id    = var.prod_network_account_id
+  name_prefix = "zpa-connectors-"
+  # Region is implicit from the aws provider — API is region-scoped.
+}
+```
+
+**Why `owner_id + name_prefix` and not tag filters**: AWS RAM does not
+propagate owner-applied tags to consumer accounts for Managed Prefix Lists.
+Tag-based filtering (`service = "ZPA"`) only works for locally-owned lists
+(same-account lookups). `owner_id + name_prefix` works in every case.
+
+Every prefix list is still tagged on the provider side for console
+legibility, audit, and cost allocation:
 
 | Tag          | Example          |
 |--------------|------------------|
 | `Service`    | `ZPA`            |
 | `Group`      | `connectors`     |
 | `Environment`| `prod`           |
-| `Region`     | `eu-west-1`      |
+| `Region`     | `us-east-1`      |
 | `Owner`      | `network-team`   |
 | `ManagedBy`  | `terraform`      |
-| `Name`       | `zpa-connectors-prod-eu-west-1` |
-
-Consumer looks up by tags — no IDs, no cross-region leakage:
-
-```hcl
-module "zpa_pl" {
-  source      = "../modules/prefix-list-consumer"
-  service     = "ZPA"
-  environment = "prod"
-  # Region is implicit from the aws provider — API is region-scoped.
-}
-```
+| `Name`       | `zpa-connectors-prod-us-east-1` |
 
 ## Cross-account (RAM) — Step 3
 
@@ -128,16 +152,19 @@ Then `terraform apply`.
 ## Run book
 
 ```bash
-# First time per region
-cd provider/us-east-1
+# First time per leaf
+cd provider/network-prod/us-east-1
 terraform init
 terraform plan
 terraform apply
 
-# Daily edit loop
-$EDITOR provider/us-east-1/zpa-connectors.tf
+# Daily edit loop (any leaf, any list)
+$EDITOR provider/network-prod/us-east-1/zpa-connectors.tf
 terraform apply
 ```
+
+CI does the same thing automatically: `plan` on PR, `apply` on merge to `main`
+for every leaf under `provider/` and `consumer/`.
 
 ## Replicating this repo for your own environment
 
@@ -152,9 +179,11 @@ git clone https://github.com/cloudor-devops/PrefixLists.git
 cd PrefixLists
 ```
 
-The repo ships with two example regions: `provider/us-east-1/` and
-`provider/eu-west-1/`. Delete the one you don't need, or rename/copy to your
-target region. Update `providers.tf` inside to your region name.
+The repo ships with four provider account aliases covering common real-world
+topologies: `network-prod/`, `network-staging/`, `network-dr/`, and
+`network-shared/`. Delete the ones you don't need, rename/copy to match your
+actual account structure. See [TOPOLOGY.md](TOPOLOGY.md) and
+[SCENARIOS.md](SCENARIOS.md) for the full model and worked examples.
 
 ### 2. Author your prefix lists
 

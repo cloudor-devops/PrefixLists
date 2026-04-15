@@ -1,0 +1,137 @@
+name: Terraform CI
+
+# Leaf-folder automation.
+#
+# Discovery rule: every directory anywhere under provider/ or consumer/
+# that contains a versions.tf is a "leaf stack". Each leaf gets its own
+# independent terraform init/plan/apply run. The matrix is built at job
+# start so adding a new leaf folder requires zero CI changes — it gets
+# picked up automatically on the next PR.
+#
+# On PR: plan every leaf, comment on the PR with a summary.
+# On merge to main: apply every leaf.
+
+on:
+  pull_request:
+    paths:
+      - 'provider/**'
+      - 'consumer/**'
+      - 'modules/**'
+      - '.github/workflows/ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'provider/**'
+      - 'consumer/**'
+      - 'modules/**'
+
+permissions:
+  id-token: write      # OIDC for aws-actions/configure-aws-credentials
+  contents: read
+  pull-requests: write # to comment on PRs
+
+jobs:
+  # -------------------------------------------------------------------
+  # Discover every leaf folder. Output: JSON array of { path, name }.
+  # -------------------------------------------------------------------
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      leaves: ${{ steps.find.outputs.leaves }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find leaf folders
+        id: find
+        run: |
+          # A leaf is any directory under provider/ or consumer/ that has
+          # a versions.tf. Modules under modules/ are libraries, not leaves.
+          leaves=$(find provider consumer -name versions.tf -not -path '*/modules/*' -not -path '*/.terraform/*' \
+            | xargs -n1 dirname \
+            | sort -u \
+            | jq -R -s -c 'split("\n") | map(select(length > 0)) | map({path: ., name: (. | gsub("/"; "-"))})')
+          echo "leaves=$leaves" >> "$GITHUB_OUTPUT"
+          echo "Discovered leaves:"
+          echo "$leaves" | jq .
+
+  # -------------------------------------------------------------------
+  # On pull request: plan every leaf in parallel.
+  # -------------------------------------------------------------------
+  plan:
+    if: github.event_name == 'pull_request'
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        leaf: ${{ fromJson(needs.discover.outputs.leaves) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_{0}', matrix.leaf.name)] || secrets.AWS_ROLE_DEFAULT }}
+          aws-region: us-east-1  # overridden per-leaf via providers.tf
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+
+      - name: Terraform init
+        working-directory: ${{ matrix.leaf.path }}
+        run: terraform init -input=false
+
+      - name: Terraform plan
+        working-directory: ${{ matrix.leaf.path }}
+        run: |
+          set -o pipefail
+          terraform plan -input=false -no-color -out=tfplan 2>&1 | tee plan.txt
+          echo "leaf=${{ matrix.leaf.path }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^(Plan:|No changes)' plan.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-${{ matrix.leaf.name }}
+          path: |
+            ${{ matrix.leaf.path }}/tfplan
+            ${{ matrix.leaf.path }}/plan.txt
+
+  # -------------------------------------------------------------------
+  # On merge to main: apply every leaf in parallel.
+  # -------------------------------------------------------------------
+  apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        leaf: ${{ fromJson(needs.discover.outputs.leaves) }}
+    concurrency:
+      group: tf-apply-${{ matrix.leaf.name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_{0}', matrix.leaf.name)] || secrets.AWS_ROLE_DEFAULT }}
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+
+      - name: Terraform init
+        working-directory: ${{ matrix.leaf.path }}
+        run: terraform init -input=false
+
+      - name: Terraform apply
+        working-directory: ${{ matrix.leaf.path }}
+        run: terraform apply -input=false -auto-approve

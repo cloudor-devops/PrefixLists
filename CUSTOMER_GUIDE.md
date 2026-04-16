@@ -127,7 +127,26 @@ aws ec2 describe-managed-prefix-lists \
 
 ## Phase 3 — Consumer: wire SG rules to the shared prefix lists
 
-Choose the discovery mode that matches the account setup:
+Choose the discovery mode that matches the account setup.
+
+**Important — how tag discovery and CI work together**:
+
+Tag-based discovery runs during `terraform plan` — it queries AWS for prefix
+lists matching the `Service` + `Environment` tags. This means:
+
+- **CIDR changes** to an existing prefix list propagate to the consumer SG
+  **instantly via AWS** — no consumer plan/apply needed at all.
+- **New prefix lists** (matching the consumer's tag filter) are only picked
+  up when the consumer's `terraform plan` runs and the data source refreshes.
+
+With CI enabled (Phase 5), this plan/apply happens **automatically** after
+every provider merge. CI applies the provider leaf first (creates the new
+list in AWS), then applies all consumer leaves (tag filter discovers it,
+SG rule gets created). No one on the consumer side needs to run anything.
+
+Without CI, someone would need to run `terraform apply` on the consumer side
+manually to pick up new prefix lists. CIDR changes still propagate
+automatically either way.
 
 ### Option A — Same-account POC (tag-based discovery)
 
@@ -208,13 +227,18 @@ resource "aws_vpc_security_group_ingress_rule" "zpa" {
 3. Check the consumer SG in the console — click the `pl-xxx` link in the
    inbound rules to see the new CIDR. No consumer apply needed.
 
-### Test 2: New prefix list discovery (consumer plan/apply or CI)
+### Test 2: New prefix list discovery
 
-1. Provider creates a new `.tf` file with matching tags
+1. Provider creates a new `.tf` file with matching `Service` + `Environment` tags
 2. Provider adds its ARN to `ram.tf`
-3. `terraform apply` on provider
-4. Consumer `terraform plan` shows `+1 ingress rule` if the tag/name filter matches
-5. Consumer `terraform apply` (or CI does it automatically)
+3. `terraform apply` on provider — the new prefix list now exists in AWS
+4. Consumer `terraform plan` shows `+1 ingress rule` (the tag filter found the new list)
+5. Consumer `terraform apply` creates the new SG rule
+
+**With CI (Phase 5)**: steps 3-5 happen automatically on PR merge. The
+provider team merges a PR, CI applies the provider leaf, then CI applies
+all consumer leaves. The consumer team does nothing — CI runs the
+plan/apply that triggers the tag discovery.
 
 ---
 

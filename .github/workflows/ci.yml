@@ -49,11 +49,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Find leaf folders
+      - name: Find CI-enabled leaf folders
         id: find
         run: |
+          # A leaf is CI-enabled if it contains both versions.tf AND a .ci
+          # marker file. Template leaves (no .ci) are skipped. To enable CI
+          # for a new leaf, add an empty .ci file: touch <leaf>/.ci
           find_leaves() {
-            find "$1" -name versions.tf -not -path '*/.terraform/*' \
+            find "$1" -name '.ci' -not -path '*/.terraform/*' \
               | xargs -n1 dirname | sort -u \
               | jq -R -s -c 'split("\n") | map(select(length > 0)) | map({path: ., name: (. | gsub("/"; "-"))})'
           }

@@ -1,4 +1,4 @@
 provider "aws" {
   region  = "us-east-1"
-  # profile = "non-prod"
+  profile = var.aws_profile
 }

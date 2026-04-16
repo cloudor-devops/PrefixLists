@@ -220,23 +220,146 @@ resource "aws_vpc_security_group_ingress_rule" "zpa" {
 
 ## Phase 5 — Enable CI (recommended)
 
-Once the manual flow is validated, enable CI for hands-free operation:
+CI automates plan/apply so nobody runs Terraform manually. When the
+provider team merges a change, CI applies the provider leaves first, then
+re-applies all consumer leaves. Consumer SGs update without any consumer
+team involvement.
 
-1. Set up an **OIDC role** in each AWS account for GitHub Actions
-2. Add GitHub secret `AWS_ROLE_DEFAULT` (or per-leaf secrets)
-3. Add `backend.tf` to each leaf for remote state (S3 + DynamoDB)
-4. Enable branch protection on `main` (require PR + approval)
+### 5.1 Create the GitHub Actions OIDC identity provider in AWS
 
-CI workflow (`.github/workflows/ci.yml`):
-- **On PR**: runs `terraform plan` on every leaf, shows diff in the PR
-- **On merge**: applies provider leaves first, then consumer leaves
-- **Daily schedule**: re-applies consumer leaves to catch new lists or drift
+Run once per AWS account:
+```bash
+aws iam create-open-id-connect-provider \
+  --url https://token.actions.githubusercontent.com \
+  --client-id-list sts.amazonaws.com \
+  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
+```
 
-With CI enabled, the day-to-day flow becomes:
-1. Provider team edits a `.tf` file, opens a PR
-2. CI runs plan, team reviews
-3. Merge -> CI applies provider -> CI applies all consumers
-4. All consumer SGs update automatically
+### 5.2 Create an IAM role for GitHub Actions
+
+Replace `<ACCOUNT_ID>` and `<GITHUB_ORG>/<REPO>` with your values:
+```bash
+aws iam create-role \
+  --role-name GitHubActionsTerraform \
+  --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
+        "StringLike": {"token.actions.githubusercontent.com:sub": "repo:<GITHUB_ORG>/<REPO>:*"}
+      }
+    }]
+  }'
+```
+
+Attach permissions (scope down for production):
+```bash
+aws iam attach-role-policy --role-name GitHubActionsTerraform \
+  --policy-arn arn:aws:iam::aws:policy/AmazonEC2FullAccess
+
+aws iam put-role-policy --role-name GitHubActionsTerraform \
+  --policy-name RAMAccess \
+  --policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"ram:*","Resource":"*"}]}'
+```
+
+### 5.3 Add the GitHub secret
+
+```bash
+gh secret set AWS_ROLE_DEFAULT \
+  --repo <GITHUB_ORG>/<REPO> \
+  --body "arn:aws:iam::<ACCOUNT_ID>:role/GitHubActionsTerraform"
+```
+
+Or via GitHub web: Settings -> Secrets and variables -> Actions -> New
+repository secret -> Name: `AWS_ROLE_DEFAULT`, Value: the role ARN.
+
+### 5.4 Mark leaves as CI-enabled
+
+Only leaves with a `.ci` marker file are picked up by CI. Template leaves
+without `.ci` are skipped.
+
+```bash
+touch provider/network-prod/<region>/.ci
+touch consumer/examples/workload-same-account/.ci
+# add .ci to any other leaf you want CI to manage
+```
+
+### 5.5 (Optional) Set up remote state for CI apply
+
+CI plan works without remote state (plans from scratch). CI apply needs
+shared state. Add `backend.tf` to each CI-enabled leaf:
+
+```hcl
+# provider/network-prod/<region>/backend.tf
+terraform {
+  backend "s3" {
+    bucket         = "<TFSTATE_BUCKET>"
+    key            = "prefix-lists/network-prod/<region>/terraform.tfstate"
+    region         = "<region>"
+    dynamodb_table = "<TFSTATE_LOCK_TABLE>"
+    encrypt        = true
+  }
+}
+```
+
+Create the S3 bucket + DynamoDB table first:
+```bash
+aws s3api create-bucket --bucket <TFSTATE_BUCKET> --region <region>
+aws s3api put-bucket-versioning --bucket <TFSTATE_BUCKET> \
+  --versioning-configuration Status=Enabled
+aws dynamodb create-table --table-name <TFSTATE_LOCK_TABLE> \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST --region <region>
+```
+
+Add S3/DynamoDB permissions to the GitHub Actions role:
+```bash
+aws iam put-role-policy --role-name GitHubActionsTerraform \
+  --policy-name TerraformState \
+  --policy-document '{
+    "Version":"2012-10-17",
+    "Statement":[
+      {"Effect":"Allow","Action":"s3:*","Resource":["arn:aws:s3:::<TFSTATE_BUCKET>","arn:aws:s3:::<TFSTATE_BUCKET>/*"]},
+      {"Effect":"Allow","Action":"dynamodb:*","Resource":"arn:aws:dynamodb:<region>:<ACCOUNT_ID>:table/<TFSTATE_LOCK_TABLE>"}
+    ]
+  }'
+```
+
+### 5.6 Test CI
+
+1. Push the code to the repo
+2. Create a branch, make a small change (e.g., add a CIDR entry)
+3. Open a PR -> CI runs `terraform plan` on all `.ci`-enabled leaves
+4. Review the plan output in the GitHub Actions summary
+5. Merge -> CI runs `terraform apply` (Phase 1: provider, Phase 2: consumer)
+6. Verify in the AWS Console that the change applied
+
+### CI flow diagram
+
+```
+PR opened
+  ↓
+CI: terraform plan (all .ci-enabled leaves, parallel)
+  ↓
+Plan output visible in GitHub Actions
+  ↓
+Reviewer approves + merges
+  ↓
+CI Phase 1: terraform apply (provider/ leaves)
+  ↓  prefix lists created/updated in AWS
+CI Phase 2: terraform apply (consumer/ leaves)
+  ↓  tag filters re-run, SG rules reconciled
+Done — all consumer SGs reflect the change
+
+Daily schedule (weekdays 06:00 UTC):
+  CI applies all consumer leaves → catches new lists or drift
+```
 
 ---
 

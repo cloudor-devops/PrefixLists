@@ -38,6 +38,7 @@ module "vendor_apis_prefix_lists" {
 # --- Security Group ---
 
 resource "aws_security_group" "app" {
+  count       = var.vpc_id != "" ? 1 : 0
   name        = "app-tag-discovery-demo"
   description = "Tag-based discovery demo - all prefix lists found by Service + Environment tags"
   vpc_id      = var.vpc_id
@@ -46,8 +47,8 @@ resource "aws_security_group" "app" {
 # --- Ingress rules ---
 
 resource "aws_vpc_security_group_ingress_rule" "zpa" {
-  for_each          = toset(module.zpa_prefix_lists.ids)
-  security_group_id = aws_security_group.app.id
+  for_each          = var.vpc_id != "" ? toset(module.zpa_prefix_lists.ids) : toset([])
+  security_group_id = aws_security_group.app[0].id
   prefix_list_id    = each.value
   ip_protocol       = "tcp"
   from_port         = 443
@@ -56,8 +57,8 @@ resource "aws_vpc_security_group_ingress_rule" "zpa" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "offices_ssh" {
-  for_each          = toset(module.offices_prefix_lists.ids)
-  security_group_id = aws_security_group.app.id
+  for_each          = var.vpc_id != "" ? toset(module.offices_prefix_lists.ids) : toset([])
+  security_group_id = aws_security_group.app[0].id
   prefix_list_id    = each.value
   ip_protocol       = "tcp"
   from_port         = 22
@@ -66,8 +67,8 @@ resource "aws_vpc_security_group_ingress_rule" "offices_ssh" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "cpc" {
-  for_each          = toset(module.cpc_prefix_lists.ids)
-  security_group_id = aws_security_group.app.id
+  for_each          = var.vpc_id != "" ? toset(module.cpc_prefix_lists.ids) : toset([])
+  security_group_id = aws_security_group.app[0].id
   prefix_list_id    = each.value
   ip_protocol       = "tcp"
   from_port         = 443
@@ -78,8 +79,8 @@ resource "aws_vpc_security_group_ingress_rule" "cpc" {
 # --- Egress rules ---
 
 resource "aws_vpc_security_group_egress_rule" "vendor_apis" {
-  for_each          = toset(module.vendor_apis_prefix_lists.ids)
-  security_group_id = aws_security_group.app.id
+  for_each          = var.vpc_id != "" ? toset(module.vendor_apis_prefix_lists.ids) : toset([])
+  security_group_id = aws_security_group.app[0].id
   prefix_list_id    = each.value
   ip_protocol       = "tcp"
   from_port         = 443

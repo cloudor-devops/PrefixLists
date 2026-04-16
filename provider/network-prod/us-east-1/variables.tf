@@ -1,5 +1,8 @@
-# RAM settings. Defaults are safe for the first apply (no cross-account
-# sharing). Flip via terraform.tfvars (preferred) or by editing defaults here.
+variable "aws_profile" {
+  description = "Named AWS profile. Null = use default credentials (OIDC in CI, env vars locally)."
+  type        = string
+  default     = null
+}
 
 variable "ram_enabled" {
   description = "Create a RAM share and associate every prefix list in this region."

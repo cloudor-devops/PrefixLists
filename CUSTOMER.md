@@ -15,23 +15,23 @@ new CIDRs in their Security Groups — **no consumer-side Terraform run**.
 - 2+ AWS accounts: one **provider** (owns the IPs), one+ **consumer** (runs workloads).
 - AWS CLI profiles for each account (SSO, named profiles, or env creds).
 - Terraform ≥ 1.5, AWS provider ≥ 5.40 (already pinned).
-- A VPC in each consumer account (only needed if you use `consumer/` as a smoke test).
+- A VPC in each consumer account (only needed for the smoke test examples).
 
 ## Checklist
 
 - [ ] `git clone https://github.com/cloudor-devops/PrefixLists.git && cd PrefixLists`
-- [ ] Under `provider/`, **delete regions you don't need**. To add one, `cp -r provider/us-east-1 provider/<your-region>` and update `providers.tf` + RAM share name in `ram.tf`.
-- [ ] In each `provider/<region>/*.tf`: replace example CIDRs with real ones, update `max_entries` to `current × 2` (floor 15–20), update the `# PADDING` comment.
-- [ ] In `provider/<region>/ram.tf`: add/remove entries in `local.shared_prefix_list_arns` to match the `.tf` files you kept.
-- [ ] Create `provider/<region>/terraform.tfvars` from the `.example` (see below).
-- [ ] `cd provider/<region> && terraform init && terraform apply`.
-- [ ] In each consumer account: accept the RAM invitation (see below). Skip if same AWS Org.
-- [ ] Import `modules/prefix-list-consumer` into your workload Terraform and replace inline `cidr_blocks` with `prefix_list_id` (see below).
+- [ ] Under `provider/`, pick the account-alias folders (`network-prod/`, `network-staging/`, `network-dr/`, `network-shared/`) that match your topology. Delete the rest, or rename/copy. See [`TOPOLOGY.md`](TOPOLOGY.md) for the full model.
+- [ ] In each leaf `provider/<alias>/<region>/*.tf`: replace example CIDRs with real ones, update `max_entries` to `current × 2` (floor 15–20), update the `# PADDING` comment.
+- [ ] In each leaf's `ram.tf`: add/remove entries in `local.shared_prefix_list_arns` to match the `.tf` files you kept.
+- [ ] Create `terraform.tfvars` from the `.example` in each leaf (see below).
+- [ ] `cd provider/<alias>/<region> && terraform init && terraform apply`.
+- [ ] In each consumer account: accept the RAM invitation (see below). Skip if same AWS Org with `enable-sharing-with-aws-organization`.
+- [ ] Pick a consumer example from `consumer/examples/` (or import `modules/prefix-list-consumer` directly into your workload Terraform). Replace inline `cidr_blocks` with `prefix_list_id`.
 - [ ] Demo the update loop to the owning team: add an entry, apply, watch it appear in the consumer account.
 
 ## Tfvars templates
 
-### `provider/<region>/terraform.tfvars`
+### `provider/<alias>/<region>/terraform.tfvars`
 ```hcl
 ram_enabled = true
 
@@ -46,13 +46,14 @@ ram_principals = [
 ram_allow_external_principals = true
 ```
 
-### `consumer/terraform.tfvars` (only if you use the example consumer stack)
+### `consumer/examples/<workload>/terraform.tfvars`
 ```hcl
-provider_owner_id = "111111111111"          # the provider account ID
-vpc_id            = "vpc-xxxxxxxxxxxxxxxxx" # any VPC in the consumer account
-aws_profile       = "my-consumer-profile"   # optional; omit for default creds
-region            = "us-east-1"             # optional override
+prod_network_account_id   = "111111111111"   # account that owns env-specific lists
+shared_network_account_id = "111111111111"   # account that owns cross-env lists (offices, vendors)
+vpc_id                    = "vpc-xxxxxxxxxxxxxxxxx"
+aws_profile               = "my-consumer-profile"   # optional; omit for default creds
 ```
+Variable names differ per example (e.g., `workload-demo` uses `provider_owner_id` instead of the split prod/shared pattern). Check the example's `variables.tf`.
 
 **Both `terraform.tfvars` files are gitignored** — safe to fill with real values.
 
@@ -85,7 +86,7 @@ Pin the module by commit SHA in production. `main` is fine for evaluation.
 module "zpa_pl" {
   source      = "git::https://github.com/cloudor-devops/PrefixLists.git//modules/prefix-list-consumer?ref=main"
   owner_id    = "111111111111"         # the provider account ID
-  name_prefix = "zpa-connectors-"      # matches names in provider/<region>/zpa-connectors.tf
+  name_prefix = "zpa-connectors-"      # matches names in provider/<alias>/<region>/zpa-connectors.tf
 }
 
 resource "aws_vpc_security_group_ingress_rule" "zpa" {
@@ -114,7 +115,7 @@ module "zpa_pl" {
 > When an IP changes, edit one file and run `terraform apply`. That's it.
 
 ```bash
-$EDITOR provider/<region>/zpa-connectors.tf   # add/remove entry { } blocks
+$EDITOR provider/<alias>/<region>/zpa-connectors.tf   # add/remove entry { } blocks
 terraform apply
 ```
 
@@ -129,7 +130,7 @@ automatically. No consumer-side Terraform run, no ticket, no coordination.
 | Tag filters on RAM-shared lists | Returns empty — **owner tags don't propagate across RAM** | Use `owner_id + name_prefix` mode (above) |
 | Under-sized `max_entries` | Later resize blocked if any consumer SG is full | Pad generously at creation (`current × 2`, floor 20) |
 | Renaming a `.tf` file after apply | Resource label changes → destroy+recreate → consumer SGs break briefly | Edit in place; don't rename active files |
-| Mixing regions in one stack | Provider aliases, gets ugly fast | Keep one folder per region under `provider/` |
+| Mixing regions in one stack | Provider aliases, gets ugly fast | Keep one folder per region under `provider/<alias>/` |
 
 ## Cost
 
@@ -139,6 +140,8 @@ compute/networking you already have.
 
 ## Support
 
-- Full architecture + rationale: `README.md`
-- Reference execution log (real IDs from the first demo run): `RAM-POC.md`
+- Full architecture + rationale: [`README.md`](README.md)
+- Folder model + onboarding flows: [`TOPOLOGY.md`](TOPOLOGY.md)
+- 9 worked real-world scenarios: [`SCENARIOS.md`](SCENARIOS.md)
+- Reference execution log (real IDs from the first demo run): [`RAM-POC.md`](RAM-POC.md)
 - Module source + variables: `modules/prefix-list-consumer/`

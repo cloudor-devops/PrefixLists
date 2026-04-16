@@ -57,7 +57,7 @@ modules/
 They edit Terraform directly. One resource per prefix list, one file per list.
 
 ```hcl
-# provider/us-east-1/zpa-connectors.tf
+# provider/network-prod/us-east-1/zpa-connectors.tf
 resource "aws_ec2_managed_prefix_list" "zpa_connectors" {
   name           = "zpa-connectors-prod-us-east-1"
   address_family = "IPv4"
@@ -142,7 +142,7 @@ prefix list via `local.shared_prefix_list_arns`, and attaches each consumer
 account principal. Gated behind `var.ram_enabled`, default `false`, so Steps 1+2
 deliver value in a single account first.
 
-Enable via `terraform.tfvars` (see `provider/<region>/terraform.tfvars.example`):
+Enable via `terraform.tfvars` (see `provider/<account-alias>/<region>/terraform.tfvars.example`):
 ```hcl
 ram_enabled    = true
 ram_principals = ["111111111111", "222222222222"]
@@ -187,7 +187,7 @@ actual account structure. See [TOPOLOGY.md](TOPOLOGY.md) and
 
 ### 2. Author your prefix lists
 
-Replace the example CIDRs in `provider/<region>/*.tf` with your real ones:
+Replace the example CIDRs in `provider/<account-alias>/<region>/*.tf` with your real ones:
 - `zpa-connectors.tf`, `cpc.tf`, `offices.tf` are the example groupings —
   rename / add / remove as your services dictate.
 - Update `max_entries` (with `current × 2`, floor 15-20) and the `# PADDING`
@@ -199,14 +199,10 @@ Replace the example CIDRs in `provider/<region>/*.tf` with your real ones:
 ### 3. Configure RAM sharing
 
 ```bash
-cp provider/us-east-1/terraform.tfvars.example provider/us-east-1/terraform.tfvars
-$EDITOR provider/us-east-1/terraform.tfvars
+cd provider/network-prod/us-east-1
+cp terraform.tfvars.example terraform.tfvars
+$EDITOR terraform.tfvars
 # set ram_principals to your consumer account IDs
-```
-
-Then:
-```bash
-cd provider/us-east-1
 terraform init
 terraform apply
 ```
@@ -222,13 +218,16 @@ aws ram accept-resource-share-invitation \
 
 ### 4. Wire consumer workloads
 
+Pick a consumer example that matches your topology (see `consumer/examples/`):
 ```bash
-cp consumer/terraform.tfvars.example consumer/terraform.tfvars
-$EDITOR consumer/terraform.tfvars
-# set provider_owner_id, vpc_id, optionally aws_profile
+cd consumer/examples/workload-prod-us-east-1
+cp terraform.tfvars.example terraform.tfvars
+$EDITOR terraform.tfvars
+# set provider account IDs, vpc_id, optionally aws_profile
+terraform init && terraform apply
 ```
 
-`consumer/main.tf` is an example. In real workloads, import
+The examples are reference stacks. In real workloads, import
 `modules/prefix-list-consumer` directly from wherever your SG lives:
 
 ```hcl
@@ -256,10 +255,10 @@ owner-applied tags are visible on same-account lookups.
 
 | File | Change |
 |---|---|
-| `provider/<region>/*.tf` | Replace example CIDRs, descriptions, names, owners |
-| `provider/<region>/ram.tf` | Update `local.shared_prefix_list_arns` as you add/remove lists |
-| `provider/<region>/terraform.tfvars` | Set `ram_principals` (gitignored, create from `.example`) |
-| `consumer/terraform.tfvars` | Set `provider_owner_id`, `vpc_id`, optional `aws_profile` |
-| `consumer/main.tf` | Update `name_prefix` values in module blocks to match your naming |
+| `provider/<alias>/<region>/*.tf` | Replace example CIDRs, descriptions, names, owners |
+| `provider/<alias>/<region>/ram.tf` | Update `local.shared_prefix_list_arns` as you add/remove lists |
+| `provider/<alias>/<region>/terraform.tfvars` | Set `ram_principals` (gitignored, create from `.example`) |
+| `consumer/examples/<workload>/terraform.tfvars` | Set provider account IDs, `vpc_id`, optional `aws_profile` |
+| `consumer/examples/<workload>/main.tf` | Update `name_prefix` values in module blocks to match your naming |
 | `RAM-POC.md` | Historical execution log from the original run — treat as reference, not config |
 

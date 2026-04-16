@@ -1,8 +1,7 @@
 # PrefixLists — Customer Handoff
 
 One-page guide to stand up **AWS Managed Prefix Lists + RAM cross-account sharing**
-in your environment. Full context in [`README.md`](README.md); end-to-end reference
-run in [`RAM-POC.md`](RAM-POC.md).
+in your environment. Full context in [`README.md`](README.md).
 
 ## What you get
 
@@ -143,5 +142,4 @@ compute/networking you already have.
 - Full architecture + rationale: [`README.md`](README.md)
 - Folder model + onboarding flows: [`TOPOLOGY.md`](TOPOLOGY.md)
 - 9 worked real-world scenarios: [`SCENARIOS.md`](SCENARIOS.md)
-- Reference execution log (real IDs from the first demo run): [`RAM-POC.md`](RAM-POC.md)
 - Module source + variables: `modules/prefix-list-consumer/`

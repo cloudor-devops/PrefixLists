@@ -10,7 +10,6 @@ data source discovery (no hard-coded `pl-xxx`).
 - **[TOPOLOGY.md](TOPOLOGY.md)** — the folder model, discovery contract, onboarding flows
 - **[SCENARIOS.md](SCENARIOS.md)** — 9 real-world variations with concrete folder/tfvars changes
 - **[CUSTOMER.md](CUSTOMER.md)** — one-page handoff guide for new customer engagements
-- **[RAM-POC.md](RAM-POC.md)** — historical reference execution log from the first end-to-end run
 
 ## Layout
 
@@ -260,5 +259,4 @@ owner-applied tags are visible on same-account lookups.
 | `provider/<alias>/<region>/terraform.tfvars` | Set `ram_principals` (gitignored, create from `.example`) |
 | `consumer/examples/<workload>/terraform.tfvars` | Set provider account IDs, `vpc_id`, optional `aws_profile` |
 | `consumer/examples/<workload>/main.tf` | Update `name_prefix` values in module blocks to match your naming |
-| `RAM-POC.md` | Historical execution log from the original run — treat as reference, not config |
 

@@ -110,11 +110,19 @@ cross-account, tag filters only for same-account.
 ## CI / CD model
 
 `.github/workflows/ci.yml`:
-- Discovers every leaf on push/PR
-- Matrix plan on PR (comments summary)
-- Matrix apply on merge to main
+- **PR**: plan every leaf (provider + consumer in parallel), upload plan artifacts
+- **Merge to main**: two-phase apply:
+  - Phase 1: apply all `provider/` leaves (prefix lists created/updated in AWS)
+  - Phase 2: apply all `consumer/` leaves AFTER provider is done (data sources
+    re-run, discover new/changed lists, reconcile SG rules)
+- **Daily schedule** (weekdays 06:00 UTC): consumer-only reconcile — catches
+  new lists or drift without requiring a code change
 - Per-leaf OIDC role via `AWS_ROLE_<leaf_name>` secret, falls back to
   `AWS_ROLE_DEFAULT`
+
+The two-phase ordering ensures prefix lists exist in AWS before any consumer
+tries to discover them. This is how "provider merges, all consumers update"
+works without any consumer team involvement.
 
 `.github/workflows/drift.yml`:
 - Nightly `plan -detailed-exitcode` on every leaf

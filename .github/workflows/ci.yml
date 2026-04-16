@@ -1,15 +1,19 @@
 name: Terraform CI
 
-# Leaf-folder automation.
+# Two-phase leaf-folder automation:
 #
-# Discovery rule: every directory anywhere under provider/ or consumer/
-# that contains a versions.tf is a "leaf stack". Each leaf gets its own
-# independent terraform init/plan/apply run. The matrix is built at job
-# start so adding a new leaf folder requires zero CI changes — it gets
-# picked up automatically on the next PR.
+#   Phase 1 — apply all provider/ leaves (creates/updates prefix lists in AWS)
+#   Phase 2 — apply all consumer/ leaves AFTER provider is done
+#             (data sources re-run, discover new/changed lists, update SG rules)
 #
-# On PR: plan every leaf, comment on the PR with a summary.
-# On merge to main: apply every leaf.
+# This ordering guarantees that prefix lists exist in AWS before any consumer
+# tries to discover them by tag or owner_id.
+#
+# Trigger:
+#   PR        → plan every leaf, upload plan artifacts
+#   Merge     → apply provider leaves, then consumer leaves
+#   Schedule  → daily consumer-only reconcile (catches new lists created
+#               outside this repo, or drift from console edits)
 
 on:
   pull_request:
@@ -24,38 +28,48 @@ on:
       - 'provider/**'
       - 'consumer/**'
       - 'modules/**'
+  schedule:
+    - cron: '0 6 * * 1-5'  # weekdays 06:00 UTC — consumer reconcile only
 
 permissions:
-  id-token: write      # OIDC for aws-actions/configure-aws-credentials
+  id-token: write
   contents: read
-  pull-requests: write # to comment on PRs
+  pull-requests: write
 
 jobs:
   # -------------------------------------------------------------------
-  # Discover every leaf folder. Output: JSON array of { path, name }.
+  # Discover leaves, split by provider vs consumer.
   # -------------------------------------------------------------------
   discover:
     runs-on: ubuntu-latest
     outputs:
-      leaves: ${{ steps.find.outputs.leaves }}
+      provider_leaves: ${{ steps.find.outputs.provider_leaves }}
+      consumer_leaves: ${{ steps.find.outputs.consumer_leaves }}
+      all_leaves: ${{ steps.find.outputs.all_leaves }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Find leaf folders
         id: find
         run: |
-          # A leaf is any directory under provider/ or consumer/ that has
-          # a versions.tf. Modules under modules/ are libraries, not leaves.
-          leaves=$(find provider consumer -name versions.tf -not -path '*/modules/*' -not -path '*/.terraform/*' \
-            | xargs -n1 dirname \
-            | sort -u \
-            | jq -R -s -c 'split("\n") | map(select(length > 0)) | map({path: ., name: (. | gsub("/"; "-"))})')
-          echo "leaves=$leaves" >> "$GITHUB_OUTPUT"
-          echo "Discovered leaves:"
-          echo "$leaves" | jq .
+          find_leaves() {
+            find "$1" -name versions.tf -not -path '*/.terraform/*' \
+              | xargs -n1 dirname | sort -u \
+              | jq -R -s -c 'split("\n") | map(select(length > 0)) | map({path: ., name: (. | gsub("/"; "-"))})'
+          }
+          provider_leaves=$(find_leaves provider)
+          consumer_leaves=$(find_leaves consumer)
+          all_leaves=$(echo "[$provider_leaves, $consumer_leaves]" | jq -c 'flatten')
+
+          echo "provider_leaves=$provider_leaves" >> "$GITHUB_OUTPUT"
+          echo "consumer_leaves=$consumer_leaves" >> "$GITHUB_OUTPUT"
+          echo "all_leaves=$all_leaves" >> "$GITHUB_OUTPUT"
+
+          echo "Provider leaves:" && echo "$provider_leaves" | jq .
+          echo "Consumer leaves:" && echo "$consumer_leaves" | jq .
 
   # -------------------------------------------------------------------
-  # On pull request: plan every leaf in parallel.
+  # PR: plan every leaf (provider + consumer, in parallel).
   # -------------------------------------------------------------------
   plan:
     if: github.event_name == 'pull_request'
@@ -64,7 +78,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leaf: ${{ fromJson(needs.discover.outputs.leaves) }}
+        leaf: ${{ fromJson(needs.discover.outputs.all_leaves) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -72,7 +86,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets[format('AWS_ROLE_{0}', matrix.leaf.name)] || secrets.AWS_ROLE_DEFAULT }}
-          aws-region: us-east-1  # overridden per-leaf via providers.tf
+          aws-region: us-east-1
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -87,10 +101,10 @@ jobs:
         run: |
           set -o pipefail
           terraform plan -input=false -no-color -out=tfplan 2>&1 | tee plan.txt
-          echo "leaf=${{ matrix.leaf.path }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ${{ matrix.leaf.path }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
           grep -E '^(Plan:|No changes)' plan.txt >> "$GITHUB_STEP_SUMMARY" || true
-          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload plan artifact
         uses: actions/upload-artifact@v4
@@ -101,17 +115,61 @@ jobs:
             ${{ matrix.leaf.path }}/plan.txt
 
   # -------------------------------------------------------------------
-  # On merge to main: apply every leaf in parallel.
+  # Merge: Phase 1 — apply provider leaves.
+  # Creates/updates prefix lists in AWS before consumers try to find them.
   # -------------------------------------------------------------------
-  apply:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  apply-provider:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: discover
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
-        leaf: ${{ fromJson(needs.discover.outputs.leaves) }}
+        leaf: ${{ fromJson(needs.discover.outputs.provider_leaves) }}
+    concurrency:
+      group: tf-apply-${{ matrix.leaf.name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_{0}', matrix.leaf.name)] || secrets.AWS_ROLE_DEFAULT }}
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+
+      - name: Terraform init
+        working-directory: ${{ matrix.leaf.path }}
+        run: terraform init -input=false
+
+      - name: Terraform apply
+        working-directory: ${{ matrix.leaf.path }}
+        run: terraform apply -input=false -auto-approve
+
+  # -------------------------------------------------------------------
+  # Merge: Phase 2 — apply consumer leaves AFTER provider is done.
+  # Data sources re-run, discover new/changed lists, update SG rules.
+  # Also runs on schedule for daily reconcile (no provider phase needed).
+  # -------------------------------------------------------------------
+  apply-consumer:
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'schedule'
+    needs: [discover, apply-provider]
+    # When triggered by schedule, apply-provider is skipped (no provider
+    # leaves to apply). The 'if' on apply-provider prevents it from running,
+    # and needs[] with a skipped job still allows this job to proceed.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        leaf: ${{ fromJson(needs.discover.outputs.consumer_leaves) }}
     concurrency:
       group: tf-apply-${{ matrix.leaf.name }}
       cancel-in-progress: false

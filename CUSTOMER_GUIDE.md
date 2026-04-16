@@ -23,13 +23,16 @@ Related docs:
 
 | Item | Placeholder | How to get it |
 |------|-------------|---------------|
-| Provider account ID | `<PROVIDER_ACCOUNT_ID>` | `aws sts get-caller-identity --profile <provider>` |
-| Consumer account ID | `<CONSUMER_ACCOUNT_ID>` | `aws sts get-caller-identity --profile <consumer>` |
+| Provider account ID | `<PROVIDER_ACCOUNT_ID>` | `aws sts get-caller-identity --profile <provider-profile>` |
+| Consumer account ID | `<CONSUMER_ACCOUNT_ID>` | `aws sts get-caller-identity --profile <consumer-profile>` |
 | Provider AWS profile | `<provider-profile>` | `~/.aws/config` |
 | Consumer AWS profile | `<consumer-profile>` | `~/.aws/config` |
 | Target region | `<region>` | Customer decision |
-| Consumer VPC ID | `<VPC_ID>` | `aws ec2 describe-vpcs --profile <consumer>` |
-| Organization ID (optional) | `<ORG_ID>` | `aws organizations describe-organization` |
+| Consumer VPC ID | `<VPC_ID>` | `aws ec2 describe-vpcs --profile <consumer-profile>` |
+| GitHub org/repo | `<GITHUB_ORG>/<REPO>` | Your GitHub repository path (e.g., `cloudor-devops/PrefixLists`) |
+| TF state bucket (Phase 5) | `<TFSTATE_BUCKET>` | You create it — e.g., `<customer>-tfstate-prefix-lists` |
+| TF state lock table (Phase 5) | `<TFSTATE_LOCK_TABLE>` | You create it — e.g., `terraform-state-lock` |
+| Organization ID (optional) | `<ORG_ID>` | `aws organizations describe-organization` (from mgmt account) |
 
 ---
 
@@ -51,11 +54,11 @@ Pick the topology that matches the customer. For a minimal POC, keep only
 cd provider/network-prod/<region>
 ```
 
-**`providers.tf`** — set the AWS profile and region:
+**`providers.tf`** — set the region only (profile is set via `terraform.tfvars`):
 ```hcl
 provider "aws" {
   region  = "<region>"
-  profile = "<provider-profile>"
+  profile = var.aws_profile   # set aws_profile in terraform.tfvars, not here
 }
 ```
 
@@ -81,6 +84,7 @@ cp terraform.tfvars.example terraform.tfvars
 ```
 Edit:
 ```hcl
+aws_profile    = "<provider-profile>"   # null = use default credentials (OIDC in CI)
 ram_enabled    = true
 ram_principals = [
   "<CONSUMER_ACCOUNT_ID>",
@@ -157,6 +161,11 @@ cd consumer/examples/workload-same-account
 terraform init
 terraform apply -var 'vpc_id=<VPC_ID>'
 ```
+
+Note: `vpc_id` defaults to `""`. When empty (e.g., in CI plan-only mode),
+the SG and rules are skipped but tag discovery still runs — useful for
+validating the tag filter returns the right prefix lists without creating
+any AWS resources.
 
 The consumer code:
 ```hcl
@@ -251,7 +260,11 @@ team involvement.
 
 ### 5.1 Create the GitHub Actions OIDC identity provider in AWS
 
-Run once per AWS account:
+Run once per AWS account. For cross-account setups, repeat steps 5.1-5.2
+in **each** account (provider and consumer) and add a separate GitHub
+secret per account (e.g., `AWS_ROLE_provider-network-prod-us-east-1` and
+`AWS_ROLE_consumer-examples-workload-demo`). For single-account POCs,
+one role + `AWS_ROLE_DEFAULT` is enough.
 ```bash
 aws iam create-open-id-connect-provider \
   --url https://token.actions.githubusercontent.com \
@@ -313,10 +326,11 @@ touch consumer/examples/workload-same-account/.ci
 # add .ci to any other leaf you want CI to manage
 ```
 
-### 5.5 (Optional) Set up remote state for CI apply
+### 5.5 Set up remote state for CI apply (required for apply, optional for plan-only)
 
-CI plan works without remote state (plans from scratch). CI apply needs
-shared state. Add `backend.tf` to each CI-enabled leaf:
+CI plan works without remote state (plans from scratch — shows all
+resources as "to create"). CI **apply** needs remote state so it can track
+what already exists. Add `backend.tf` to each CI-enabled leaf:
 
 ```hcl
 # provider/network-prod/<region>/backend.tf

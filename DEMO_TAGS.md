@@ -1,47 +1,49 @@
 # Demo: Tag-Based Discovery (Single Account)
 
-This demo proves the original spec's design: the consumer discovers prefix
-lists by `Service` + `Environment` tags. No hardcoded IDs, no account IDs,
-no naming conventions. Pure tag filtering.
+Walkthrough for presenting the tag-based prefix list discovery POC.
+Each step demonstrates a specific capability of the solution.
 
-**Prerequisite**: provider and consumer run in the **same AWS account**
-(`492094933642`). Tags are visible natively — no Lambda, no cross-account
-sync needed.
-
-**Account**: `492094933642` (provider = consumer), region `us-east-1`.
+**Environment**: account `492094933642`, region `us-east-1`.
+Provider and consumer run in the same account (tags visible natively).
 
 ---
 
-## Step 1 — See how tags are defined (provider side)
+## Step 1 — Show how tags are defined on the provider side
 
-Open any prefix list file, e.g. `provider/network-prod/us-east-1/zpa-connectors.tf`:
+**Capability**: consistent tagging contract between provider and consumer.
+
+Open `provider/network-prod/us-east-1/zpa-connectors.tf` and show the tags block:
 
 ```hcl
 tags = merge(local.common_tags, {
   Name        = "zpa-connectors-prod-us-east-1"
-  Service     = "ZPA"            # ← consumer filters on this
+  Service     = "ZPA"            # consumer filters on this
   Group       = "connectors"
-  Environment = "prod"           # ← consumer filters on this
+  Environment = "prod"           # consumer filters on this
   Owner       = "network-team"
 })
 ```
 
-Every prefix list carries a `Service` and `Environment` tag. This is the
-**contract** between provider and consumer. The consumer never sees the
-list's ID or name — it only knows "I need `Service=ZPA, Environment=prod`."
+Every prefix list carries `Service` and `Environment` tags. These two fields
+are the discovery contract: the consumer only needs to know the service name
+and the environment to find the right list.
 
-**In the AWS Console**: VPC → Managed prefix lists → click any list → Tags
-tab. You'll see all 7 tags.
+**In the AWS Console**: VPC → Managed prefix lists → click any list → Tags tab.
+Show all 7 tags. Point out `Service` and `Environment` specifically.
 
-## Step 2 — See how the consumer discovers by tags
+---
 
-Open `consumer/examples/workload-same-account/main.tf`:
+## Step 2 — Show how the consumer discovers prefix lists by tags
+
+**Capability**: dynamic discovery without hardcoded IDs.
+
+Open `consumer/examples/workload-same-account/main.tf` and show the module blocks:
 
 ```hcl
 module "zpa_prefix_lists" {
   source      = "../../../modules/prefix-list-consumer"
-  service     = "ZPA"            # ← matches the tag
-  environment = "prod"           # ← matches the tag
+  service     = "ZPA"
+  environment = "prod"
 }
 
 module "offices_prefix_lists" {
@@ -51,40 +53,46 @@ module "offices_prefix_lists" {
 }
 ```
 
-Two lines per service. The module calls the AWS API:
-`describe-managed-prefix-lists --filters tag:Service=ZPA tag:Environment=prod`
-and gets back the matching prefix list IDs.
+Two lines per service. No prefix list IDs, no account IDs, no naming
+conventions. The module queries the AWS API with tag filters and returns
+matching prefix list IDs.
 
-The Security Group rules then use `for_each` over those IDs:
+The Security Group rules use `for_each` over the discovered IDs:
 ```hcl
 resource "aws_vpc_security_group_ingress_rule" "zpa" {
   for_each       = toset(module.zpa_prefix_lists.ids)
-  prefix_list_id = each.value       # ← discovered, never hardcoded
+  prefix_list_id = each.value
   ...
 }
 ```
 
-## Step 3 — Apply and verify (already done)
+---
 
-```bash
-cd consumer/examples/workload-same-account
-terraform apply -var 'vpc_id=vpc-052e9049c736ca907'
-```
+## Step 3 — Verify the applied state in the console
 
-What was created:
-- 1 Security Group: `app-tag-discovery-demo`
-- 4 rules attached (ZPA tcp/443, CPC tcp/443, Offices tcp/22, Vendor APIs tcp/443 egress)
-- All 4 prefix list IDs were discovered by tags — zero IDs in the code.
+**Capability**: SG rules reference prefix lists instead of raw CIDRs.
 
-**Verify in the console**:
+The consumer stack has been applied. Verify in the console:
+
 1. EC2 → Security Groups → `app-tag-discovery-demo`
-2. Inbound rules tab → 3 rules, each showing "Source: pl-xxxx"
-3. Outbound rules tab → 1 rule showing "Destination: pl-xxxx"
-4. Click any pl-xxxx link → Tags tab → confirms the Service + Environment tags
+2. Inbound rules tab: 3 rules, each with source `pl-xxxx` (not a CIDR)
+   - ZPA tcp/443
+   - CPC tcp/443
+   - Offices tcp/22
+3. Outbound rules tab: 1 rule with destination `pl-xxxx`
+   - Vendor APIs tcp/443
+4. Click any `pl-xxxx` link → opens the prefix list with its entries and tags
 
-## Step 4 — The killer demo: add a CIDR, watch it propagate
+All 4 prefix list IDs were discovered by `Service + Environment` tags.
+No ID appears anywhere in the consumer code.
 
-**Provider side** — edit `provider/network-prod/us-east-1/zpa-connectors.tf`:
+---
+
+## Step 4 — Demonstrate automatic CIDR propagation
+
+**Capability**: IP changes flow to consumer SGs without any consumer action.
+
+Edit `provider/network-prod/us-east-1/zpa-connectors.tf`, add:
 ```hcl
 entry {
   cidr        = "10.99.99.0/32"
@@ -92,25 +100,32 @@ entry {
 }
 ```
 
-Apply (from the provider leaf):
+Apply from the provider leaf:
 ```bash
 cd provider/network-prod/us-east-1
 terraform apply
 ```
 
-**Now check the consumer SG** — refresh EC2 → Security Groups →
-`app-tag-discovery-demo` → Inbound rules. The ZPA rule still references the
-same `pl-xxxx` — but click it and you'll see the new CIDR
-`10.99.99.0/32` in the entries.
+Refresh the consumer SG in the console: EC2 → Security Groups →
+`app-tag-discovery-demo` → Inbound rules → click the ZPA `pl-xxxx` link →
+the new CIDR `10.99.99.0/32` appears in the entries.
 
-**No consumer Terraform run. No code change. No coordination.** The prefix
-list updated, and every SG rule pointing at it inherited the change.
+The consumer did not run `terraform apply`. The SG rule still points at the
+same `pl-xxxx` ID, but AWS resolves it to the updated entry set. This is
+native prefix list behavior — any SG referencing the list inherits CIDR
+changes automatically.
 
-## Step 5 — Add a new prefix list, watch it auto-appear
+---
 
-**Provider side** — create a new file
-`provider/network-prod/us-east-1/monitoring.tf`:
+## Step 5 — Demonstrate automatic discovery of a new prefix list
 
+**Capability**: new prefix lists auto-appear in the consumer without code changes.
+
+This is the tag discovery in action. When the provider creates a new prefix
+list with tags that match the consumer's filter, the consumer picks it up on
+the next `terraform plan`.
+
+**Provider side** — create `provider/network-prod/us-east-1/monitoring.tf`:
 ```hcl
 resource "aws_ec2_managed_prefix_list" "monitoring" {
   name           = "monitoring-prod-us-east-1"
@@ -137,9 +152,10 @@ Add to `ram.tf` → `local.shared_prefix_list_arns`:
 monitoring = aws_ec2_managed_prefix_list.monitoring.arn
 ```
 
-Apply: `terraform apply`.
+Apply: `terraform apply`. The new list now exists in AWS with
+`Service=Monitoring, Environment=prod` tags.
 
-**Consumer side** — if the consumer had a module block like:
+**Consumer side** — add one module block to the consumer's `main.tf`:
 ```hcl
 module "monitoring_prefix_lists" {
   source      = "../../../modules/prefix-list-consumer"
@@ -148,26 +164,39 @@ module "monitoring_prefix_lists" {
 }
 ```
 
-...it would discover the new list on the next `terraform plan` and create
-a new SG rule automatically. The consumer just needs a block that matches
-the tag — the prefix list ID is never mentioned.
+And one rule block:
+```hcl
+resource "aws_vpc_security_group_ingress_rule" "monitoring" {
+  for_each          = toset(module.monitoring_prefix_lists.ids)
+  security_group_id = aws_security_group.app.id
+  prefix_list_id    = each.value
+  ip_protocol       = "tcp"
+  from_port         = 9100
+  to_port           = 9100
+  description       = "Monitoring ingress (tag-discovered)"
+}
+```
 
-## What the audience should take away
+Run `terraform plan`. The plan shows `+1 new ingress rule` — the tag filter
+found the new list automatically. Apply to attach it to the SG.
 
-1. **Tags are the contract.** Provider tags every list with `Service` and
-   `Environment`. Consumer filters on those tags. They never exchange IDs.
+If the consumer already had this block in place before the provider created
+the list, it would have returned zero matches (no error). The moment the
+list appears with the right tags, the next plan picks it up.
 
-2. **CIDR changes propagate automatically.** Edit the provider `.tf`, apply.
-   Every SG rule referencing the list inherits the change with zero consumer
-   action.
+---
 
-3. **New lists auto-appear.** If the consumer's tag filter matches a
-   newly-created list, it shows up on the next `terraform plan` — one new
-   SG rule, no code change in the consumer.
+## Summary for the audience
 
-4. **Region is implicit.** The AWS API is region-scoped. A consumer in
-   `eu-west-1` cannot see `us-east-1` lists, even if the tags match.
-   No cross-region leakage, no wasted SG quota.
+| Step | Capability demonstrated |
+|------|------------------------|
+| 1 | Tags are the provider-consumer contract (`Service`, `Environment`) |
+| 2 | Consumer discovers prefix lists by tags, no hardcoded IDs |
+| 3 | SG rules reference prefix lists instead of raw CIDRs |
+| 4 | CIDR changes propagate automatically, zero consumer action |
+| 5 | New prefix lists are discovered automatically via tag matching |
+
+---
 
 ## Cleanup
 
@@ -176,12 +205,12 @@ cd consumer/examples/workload-same-account
 terraform destroy -var 'vpc_id=vpc-052e9049c736ca907'
 ```
 
-This removes only the demo SG and its rules. The prefix lists in the
-provider account are untouched.
+Removes only the demo SG and its rules. Prefix lists in the provider account
+are untouched.
 
 ---
 
-## Quick reference: what's live right now
+## Live state reference
 
 | Prefix list | ID | Service tag | Environment tag |
 |---|---|---|---|

@@ -127,7 +127,7 @@ remove the filter, then destroying.
 ```hcl
 # provider/network-prod/us-east-1/terraform.tfvars
 ram_principals = [
-  "498374411602",
+  "<CONSUMER_ACCOUNT_ID>",
   "111111111111",
   "999999999999",   # <- new consumer
 ]
@@ -147,8 +147,8 @@ cp -r consumer/examples/workload-prod-us-east-1 my-workload
 cd my-workload
 cat > terraform.tfvars <<EOF
 aws_profile                = "new-consumer"
-prod_network_account_id    = "492094933642"
-shared_network_account_id  = "492094933642"
+prod_network_account_id    = "<PROVIDER_ACCOUNT_ID>"
+shared_network_account_id  = "<PROVIDER_ACCOUNT_ID>"
 vpc_id                     = "vpc-xxxxxxxxxxxxxxxxx"
 EOF
 terraform init && terraform apply

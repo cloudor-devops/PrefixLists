@@ -3,7 +3,7 @@
 Walkthrough for presenting the tag-based prefix list discovery POC.
 Each step demonstrates a specific capability of the solution.
 
-**Environment**: account `492094933642`, region `us-east-1`.
+**Environment**: account `<PROVIDER_ACCOUNT_ID>`, region `us-east-1`.
 Provider and consumer run in the same account (tags visible natively).
 
 ---
@@ -264,7 +264,7 @@ change came from outside this repo (console, another pipeline, etc.).
 
 ```bash
 cd consumer/examples/workload-same-account
-terraform destroy -var 'vpc_id=vpc-052e9049c736ca907'
+terraform destroy -var 'vpc_id=<VPC_ID>'
 ```
 
 Removes only the demo SG and its rules. Prefix lists in the provider account
@@ -281,5 +281,5 @@ are untouched.
 | cpc-endpoints-prod-us-east-1 | pl-07ce6929a85ef7673 | CPC | prod |
 | vendor-apis-prod-us-east-1 | pl-0d29f0178bf2f90d5 | VendorAPIs | prod |
 
-SG: `app-tag-discovery-demo` in VPC `vpc-052e9049c736ca907`
-Account: `492094933642`, region `us-east-1`
+SG: `app-tag-discovery-demo` in VPC `<VPC_ID>`
+Account: `<PROVIDER_ACCOUNT_ID>`, region `us-east-1`

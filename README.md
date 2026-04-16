@@ -9,7 +9,7 @@ data source discovery (no hard-coded `pl-xxx`).
 
 - **[TOPOLOGY.md](TOPOLOGY.md)** — the folder model, discovery contract, onboarding flows
 - **[SCENARIOS.md](SCENARIOS.md)** — 9 real-world variations with concrete folder/tfvars changes
-- **[CUSTOMER.md](CUSTOMER.md)** — one-page handoff guide for new customer engagements
+- **[CUSTOMER_GUIDE.md](CUSTOMER_GUIDE.md)** — one-page handoff guide for new customer engagements
 
 ## Layout
 

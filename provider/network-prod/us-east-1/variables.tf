@@ -1,5 +1,5 @@
 variable "aws_profile" {
-  description = "Named AWS profile. Null = use default credentials (OIDC in CI, env vars locally)."
+  description = "Named AWS profile. Null = use default credentials (env vars / instance role)."
   type        = string
   default     = null
 }

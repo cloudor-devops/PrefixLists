@@ -186,67 +186,6 @@ list appears with the right tags, the next plan picks it up.
 
 ---
 
-## Step 6 — Demonstrate CI-driven consumer updates across multiple workloads
-
-**Capability**: provider merges a change, CI applies it to all consumers automatically. No consumer team involvement.
-
-This is what makes the solution operational at scale. The CI workflow
-(`.github/workflows/ci.yml`) has two phases:
-
-```
-Phase 1: apply all provider/ leaves  (prefix list created/updated in AWS)
-             ↓
-Phase 2: apply all consumer/ leaves  (data sources re-run, SG rules reconciled)
-```
-
-**Demo scenario — provider adds a CIDR, 3 consumer workloads update automatically:**
-
-1. Provider team edits `provider/network-prod/us-east-1/zpa-connectors.tf`:
-   ```hcl
-   entry {
-     cidr        = "10.99.99.0/32"
-     description = "demo-new-connector"
-   }
-   ```
-
-2. Provider opens a PR. CI runs `terraform plan` on every leaf:
-   - `provider/network-prod/us-east-1`: `Plan: 0 to add, 1 to change` (prefix list entry added)
-   - `consumer/examples/workload-same-account`: `No changes` (same pl-xxx ID, CIDR propagates via AWS)
-   - `consumer/examples/workload-prod-us-east-1`: `No changes`
-   - `consumer/examples/workload-demo`: `No changes`
-
-3. Reviewer approves. PR merged to `main`.
-
-4. CI Phase 1 applies the provider leaf — prefix list updated in AWS.
-   CI Phase 2 applies all consumer leaves — data sources refresh, SG rules
-   confirmed in sync. No new rules needed (same prefix list ID, CIDRs
-   propagated by AWS already).
-
-**No consumer team opened a PR. No consumer team ran terraform. CI did it all.**
-
-**Demo scenario — provider creates a new prefix list, consumers auto-discover it:**
-
-1. Provider team creates `provider/network-prod/us-east-1/monitoring.tf`
-   with `Service=Monitoring, Environment=prod` tags. Opens PR, merges.
-
-2. CI Phase 1 applies the provider leaf — new prefix list created in AWS.
-
-3. CI Phase 2 applies the consumer leaves:
-   - Any consumer that already has `service = "Monitoring"` in its module
-     block → tag filter now returns 1 ID → plan shows `+1 ingress rule`
-     → CI applies it.
-   - Consumers without a Monitoring block → no change.
-
-4. The consumer team that wanted Monitoring added the module block once
-   (could have been months ago when the block returned zero matches).
-   The moment the provider creates the list, CI connects them.
-
-**Scheduled reconcile**: CI also runs all consumer leaves on a daily schedule
-(weekdays 06:00 UTC). This catches new lists or drift even if the provider
-change came from outside this repo (console, another pipeline, etc.).
-
----
-
 ## Summary for the audience
 
 | Step | Capability demonstrated |
@@ -256,7 +195,6 @@ change came from outside this repo (console, another pipeline, etc.).
 | 3 | SG rules reference prefix lists instead of raw CIDRs |
 | 4 | CIDR changes propagate automatically, zero consumer action |
 | 5 | New prefix lists are discovered automatically via tag matching |
-| 6 | CI applies changes to all consumers — no manual runs, no coordination |
 
 ---
 

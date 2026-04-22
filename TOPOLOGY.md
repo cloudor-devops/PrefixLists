@@ -29,7 +29,7 @@ modules/
    owning account. `<region>` matches the `aws` provider's region. No leaf
    crosses either boundary.
 3. **Modules are libraries.** `modules/` holds reusable Terraform, not leaves.
-   CI never runs `init` in a module directory.
+   Never run `terraform init` in a module directory.
 
 ## Why this shape
 
@@ -43,7 +43,7 @@ modules/
 | Ownership splits (network vs security vs IT) | Folder-level CODEOWNERS — different teams own different sub-trees |
 | New account joining the Org | Bump `ram_principals` (or use Org ARN), re-apply one leaf; no consumer changes |
 | New region for existing env | Copy a sibling leaf; change region + tags; apply |
-| New environment | New `<account-alias>` top-level folder; CI matrix picks it up automatically |
+| New environment | New `<account-alias>` top-level folder; run `terraform apply` in each new leaf |
 
 ## The account-alias conventions this repo uses
 
@@ -96,8 +96,7 @@ cross-account, tag filters only for same-account.
 ### Adding a new environment
 1. `mkdir -p provider/network-dev/us-east-1` (or copy from network-staging).
 2. Populate with appropriate CIDRs / consumer list / account alias.
-3. Add `AWS_ROLE_network-dev-us-east-1` secret in GitHub for CI OIDC.
-4. CI's leaf discovery picks it up automatically on next run.
+3. `terraform init && terraform apply` in the new leaf.
 
 ### Onboarding a new consumer account
 1. Provider side: add the account ID to `ram_principals` in the relevant
@@ -107,29 +106,15 @@ cross-account, tag filters only for same-account.
 3. (Only if accounts aren't in the same Org) accept the RAM invitation.
 4. Done. Latency from provider edit to consumer SG visibility: seconds.
 
-## CI / CD model
+## Apply model
 
-`.github/workflows/ci.yml`:
-- **PR**: plan every leaf (provider + consumer in parallel), upload plan artifacts
-- **Merge to main**: two-phase apply:
-  - Phase 1: apply all `provider/` leaves (prefix lists created/updated in AWS)
-  - Phase 2: apply all `consumer/` leaves AFTER provider is done (data sources
-    re-run, discover new/changed lists, reconcile SG rules)
-- **Daily schedule** (weekdays 06:00 UTC): consumer-only reconcile — catches
-  new lists or drift without requiring a code change
-- Per-leaf OIDC role via `AWS_ROLE_<leaf_name>` secret, falls back to
-  `AWS_ROLE_DEFAULT`
+Every leaf is an independent `terraform init/plan/apply`. When the provider
+team updates a prefix list, run `terraform apply` in the affected provider
+leaf; CIDR changes then propagate to consumer SGs automatically via AWS (the
+`pl-xxx` ID is unchanged). Picking up a *new* prefix list requires a
+consumer-side `terraform apply` so the data source re-runs and the SG rule
+is reconciled.
 
-The two-phase ordering ensures prefix lists exist in AWS before any consumer
-tries to discover them. This is how "provider merges, all consumers update"
-works without any consumer team involvement.
-
-`.github/workflows/drift.yml`:
-- Nightly `plan -detailed-exitcode` on every leaf
-- Opens a GitHub issue per drifted leaf
-- Catches console-level tinkering before someone else's apply reverts it
-
-Adding a new leaf folder requires **zero CI changes** — the discovery step
-re-runs on every pipeline run and picks up new paths automatically. The only
-required setup is an IAM role secret if the new leaf targets a different
-account.
+When applying across many leaves, apply `provider/` leaves first so the
+prefix lists exist in AWS before any consumer tries to discover them, then
+apply `consumer/` leaves.

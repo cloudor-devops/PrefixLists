@@ -39,10 +39,6 @@ consumer/
 
 modules/
   prefix-list-consumer/     # Data-source wrapper (owner_id OR tag filters)
-
-.github/workflows/
-  ci.yml                    # leaf discovery + matrix plan/apply
-  drift.yml                 # nightly drift detection
 ```
 
 ## Leaf-folder rule
@@ -161,9 +157,6 @@ terraform apply
 $EDITOR provider/network-prod/us-east-1/zpa-connectors.tf
 terraform apply
 ```
-
-CI does the same thing automatically: `plan` on PR, `apply` on merge to `main`
-for every leaf under `provider/` and `consumer/`.
 
 ## Replicating this repo for your own environment
 
